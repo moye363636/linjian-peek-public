@@ -42,3 +42,4 @@ jobs:
           name: zhangxinchuang-public-debug-apk
           path: android/*.apk
           if-no-files-found: error
+# fork workflow registration
