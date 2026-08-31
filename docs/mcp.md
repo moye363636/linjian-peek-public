@@ -1,4 +1,4 @@
-# MCP 工具清单（v0.3.7-public）
+# MCP 工具清单（v0.3.7.6-public）
 
 掌心窗 MCP 服务把手机端能力暴露给支持 MCP 的客户端。所有工具都需要你自己的 `LINJIAN_TOKEN`，并且手机端需要保持服务启动。公开版工具只保留通用能力，不包含私人绑定接口、私人 Token、私人服务地址或固定私人关系。
 
@@ -165,3 +165,10 @@ Render 一键部署时，`LINJIAN_URL` 会由 Blueprint 自动引用 server 的�
 - `extend_lock`：等同 `extend_screen_break`，延长门禁。
 - `deny_unlock_request`：等同 `deny_screen_break_release_request`，拒绝恢复申请。
 - `list_lockable_apps`、`add_locked_app`、`remove_locked_app`、`set_emergency_passphrase`：旧版命名兼容。
+
+
+## v0.3.7.6 小金库双向申请工具
+
+- `submit_companion_wallet_request`：陪伴者提交申请，等待用户处理。
+- `list_companion_wallet_requests`：陪伴者读取自己提交的申请和用户处理结果。
+- `list_wallet_request_results`：按发起方和状态筛选申请结果。
