@@ -1,4 +1,4 @@
-# MCP 工具清单（v0.3.7.6-public）
+# MCP 工具清单（v0.3.7.9-public）
 
 掌心窗 MCP 服务把手机端能力暴露给支持 MCP 的客户端。所有工具都需要你自己的 `LINJIAN_TOKEN`，并且手机端需要保持服务启动。公开版工具只保留通用能力，不包含私人绑定接口、私人 Token、私人服务地址或固定私人关系。
 
@@ -167,8 +167,41 @@ Render 一键部署时，`LINJIAN_URL` 会由 Blueprint 自动引用 server 的�
 - `list_lockable_apps`、`add_locked_app`、`remove_locked_app`、`set_emergency_passphrase`：旧版命名兼容。
 
 
-## v0.3.7.6 小金库双向申请工具
+## v0.3.7.9 小金库双向申请工具
 
 - `submit_companion_wallet_request`：陪伴者提交申请，等待用户处理。
 - `list_companion_wallet_requests`：陪伴者读取自己提交的申请和用户处理结果。
 - `list_wallet_request_results`：按发起方和状态筛选申请结果。
+- `save_user_wallet_request_result`：在用户明确同意后，写回用户对陪伴者申请的通过 / 暂缓 / 驳回和理由。
+- `edit_wallet_record`：编辑已记入小金库的账单金额、分类、商家和备注。
+- `delete_wallet_record`：删除一条小金库账单。
+
+## v0.3.7.9 外卖助手工具
+
+- `get_takeout_state`：读取外卖助手预算、口味偏好、常点外卖库和最近点单状态。
+- `set_takeout_budget`：设置单餐预算、今日外卖预算和口味偏好。
+- `add_takeout_card` / `save_takeout_card` / `update_takeout_card`：保存或编辑常点外卖卡片，支持分享链接、具体菜品链接、价格区间、备注、规格选择和金额保护。
+- `delete_takeout_card` / `remove_takeout_card`：删除常点外卖卡片。
+- `list_takeout_cards` / `list_takeout_meals`：读取常点外卖库。
+- `remember_takeout_meal` / `remember_current_takeout_meal`：把用户复制的当前外卖分享链接记成一道可复用的饭。
+- `suggest_takeout_options`：根据预算和偏好从常点库里推荐外卖。
+- `create_takeout_plan`：生成点餐行动卡。
+- `takeout_wallet_request`：把外卖计划提交到小金库审批；审批通过后自动入账，付款仍由用户本人确认。
+- `open_takeout_link` / `open_takeout_plan`：打开外卖链接，不会确认订单或付款。
+- `copy_takeout_note`：复制外卖备注。
+- `record_takeout_order`：用户付款后手动补记外卖支出。
+- `prepare_takeout_checkout` / `auto_takeout_checkout`：由手机端在本地连续操作到收银台/付款页；不会点击真正支付按钮。
+- `get_takeout_checkout_status`：读取自动点单进度。
+- `cancel_takeout_checkout`：取消自动点单任务。
+
+
+## v0.3.7.9 新增工具暴露修复
+
+如果 `/health` 已显示小金库双向申请和外卖助手工具，但 AI 客户端工具面板没有暴露出来，请优先检查 MCP 服务是否已经重新部署到 `0.3.7.9`。
+
+本版提供两个兜底方案：
+
+- `wallet_takeout_action`：普通 `/mcp` 中靠前暴露的统一入口。参数 `action` 填具体工具名，`payload_json` 填对应参数 JSON。
+- `/mcp-wallet`：小金库/外卖助手专用端点。连接地址示例：`https://你的-mcp-域名/mcp-wallet`。
+
+常用 action 示例：`submit_companion_wallet_request`、`list_companion_wallet_requests`、`save_user_wallet_request_result`、`get_takeout_state`、`prepare_takeout_checkout`。

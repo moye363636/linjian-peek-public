@@ -10,6 +10,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -365,7 +367,7 @@ public class WalletActivity extends Activity {
         TextView icon = new TextView(this); icon.setText("审"); icon.setTextSize(16); icon.setTextColor(ink); icon.setTypeface(Typeface.DEFAULT_BOLD); icon.setGravity(Gravity.CENTER); icon.setBackground(round(primarySoft, dp(18), 0, 0)); row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
         LinearLayout mid = new LinearLayout(this); mid.setOrientation(LinearLayout.VERTICAL); LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(0, -2, 1); mp.leftMargin = dp(10); row.addView(mid, mp);
         TextView name = text(statusLabel(r) + "｜" + r.optString("category", "其他"), 14, true); mid.addView(name);
-        TextView note = small(r.optString("item", r.optString("note", "这笔消费"))); note.setMaxLines(1); mid.addView(note);
+        TextView note = small(r.optString("item", r.optString("note", "这笔申请"))); note.setMaxLines(1); mid.addView(note);
         TextView money = text("¥" + WalletState.money(r.optDouble("amount",0)), 14, true); row.addView(money);
         TextView msg = small(r.optString("approval_message", defaultApprovalWaitingText(r))); msg.setPadding(dp(52), dp(8), 0, 0); box.addView(msg);
         box.setOnClickListener(v -> showApprovalDetail(r));
@@ -377,7 +379,7 @@ public class WalletActivity extends Activity {
         StringBuilder sb = new StringBuilder();
         sb.append("金额：¥").append(WalletState.money(r.optDouble("amount", 0))).append("\n");
         sb.append("分类：").append(r.optString("category", "其他")).append("\n");
-        sb.append("用途：").append(r.optString("item", r.optString("note", "这笔消费"))).append("\n");
+        sb.append("用途：").append(r.optString("item", r.optString("note", "这笔申请"))).append("\n");
         sb.append("必要程度：").append(r.optInt("necessity", 3)).append("/5\n");
         sb.append("冲动程度：").append(r.optInt("impulse", 3)).append("/5\n");
         sb.append("发起：").append(displayRequesterName(r)).append("\n");
@@ -386,13 +388,42 @@ public class WalletActivity extends Activity {
         sb.append("处理备注：\n").append(r.optString("approval_message", defaultApprovalWaitingText(r)));
         AlertDialog.Builder builder = new AlertDialog.Builder(this).setTitle("审批详情").setMessage(sb.toString());
         if (canUserHandleApproval(r)) {
-            builder.setPositiveButton("通过", (d, w) -> handleApprovalDecision(r, "ok"));
-            builder.setNeutralButton("暂缓", (d, w) -> handleApprovalDecision(r, "hold"));
-            builder.setNegativeButton("驳回", (d, w) -> handleApprovalDecision(r, "no"));
+            builder.setPositiveButton("通过", (d, w) -> askApprovalReason(r, "ok"));
+            builder.setNeutralButton("暂缓", (d, w) -> askApprovalReason(r, "hold"));
+            builder.setNegativeButton("驳回", (d, w) -> askApprovalReason(r, "no"));
         } else {
             builder.setPositiveButton("知道了", null);
         }
         builder.show();
+    }
+
+    private void askApprovalReason(JSONObject r, String status) {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(14), dp(6), dp(14), 0);
+        EditText reason = input(reasonHint(status), false);
+        reason.setSingleLine(false);
+        reason.setMinLines(3);
+        form.addView(reason, new LinearLayout.LayoutParams(-1, dp(100)));
+        new AlertDialog.Builder(this)
+                .setTitle(decisionTitle(status))
+                .setMessage("写一句处理理由，会显示在审批列表里，也方便陪伴者通过 MCP 看到你的回复。")
+                .setView(form)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (d, w) -> handleApprovalDecision(r, status, reason.getText().toString().trim()))
+                .show();
+    }
+
+    private String reasonHint(String status) {
+        if ("no".equals(status)) return "写下驳回理由，例如：今天预算不够，先不买。";
+        if ("hold".equals(status)) return "写下暂缓理由，例如：晚点再看，先缓一缓。";
+        return "写下通过理由，例如：可以，记得别超预算。";
+    }
+
+    private String decisionTitle(String status) {
+        if ("no".equals(status)) return "驳回理由";
+        if ("hold".equals(status)) return "暂缓理由";
+        return "通过理由";
     }
 
     private boolean canUserHandleApproval(JSONObject r) {
@@ -401,16 +432,19 @@ public class WalletActivity extends Activity {
         return pending && "companion".equals(requesterRole(r));
     }
 
-    private void handleApprovalDecision(JSONObject r, String status) {
+    private void handleApprovalDecision(JSONObject r, String status, String reason) {
         try {
-            String note;
-            if ("no".equals(status)) note = "已驳回。";
-            else if ("hold".equals(status)) note = "先暂缓，晚点再处理。";
-            else note = "已通过。";
+            String note = reason == null ? "" : reason.trim();
+            if (note.length() == 0) {
+                if ("no".equals(status)) note = "已驳回。";
+                else if ("hold".equals(status)) note = "先暂缓，晚点再处理。";
+                else note = "已通过。";
+            }
             WalletState.decideApproval(this, new JSONObject()
                     .put("id", r.optString("id"))
                     .put("status", status)
                     .put("note", note)
+                    .put("user_reason", note)
                     .put("approved_by", AppPrefs.userName(this)));
             toast("已处理");
             showPending();
@@ -495,8 +529,69 @@ public class WalletActivity extends Activity {
             actions.addView(actionButton("计入", v -> handlePending(r, "confirm")), weightLp(1,0,4));
             actions.addView(actionButton("忽略", v -> handlePending(r, "ignore")), weightLp(1,4,4));
             actions.addView(actionButton("修改", v -> editPending(r)), weightLp(1,4,0));
+        } else {
+            attachSwipeActions(box, r);
         }
         return box;
+    }
+
+    private void attachSwipeActions(LinearLayout box, JSONObject r) {
+        GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+            @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) return false;
+                float dx = e2.getX() - e1.getX();
+                float dy = e2.getY() - e1.getY();
+                if (dx < -dp(44) && Math.abs(dx) > Math.abs(dy) * 1.2f) {
+                    showRecordSwipeActions(box, r);
+                    return true;
+                }
+                return false;
+            }
+        });
+        box.setOnTouchListener((v, ev) -> detector.onTouchEvent(ev));
+    }
+
+    private void showRecordSwipeActions(LinearLayout box, JSONObject r) {
+        if ("actions_open".equals(box.getTag())) return;
+        box.setTag("actions_open");
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(10), 0, 0);
+        box.addView(actions);
+        actions.addView(actionButton("编辑", v -> editRecord(r)), weightLp(1,0,4));
+        actions.addView(actionButton("删除", v -> confirmDeleteRecord(r)), weightLp(1,4,0));
+    }
+
+    private void editRecord(JSONObject r) {
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(14), dp(6), dp(14), 0);
+        EditText amount = input("金额", true); amount.setText(String.valueOf(r.optDouble("amount", 0))); form.addView(amount);
+        EditText category = input("分类", false); category.setText(r.optString("category", "其他")); form.addView(category);
+        EditText merchant = input("商家", false); merchant.setText(r.optString("merchant", "")); form.addView(merchant);
+        EditText note = input("备注", false); note.setText(r.optString("note", "")); form.addView(note);
+        new AlertDialog.Builder(this).setTitle("编辑账单").setView(form).setNegativeButton("取消", null).setPositiveButton("保存", (d,w)->{
+            try {
+                WalletState.updateRecord(this, new JSONObject()
+                        .put("id", r.optString("id"))
+                        .put("amount", Double.parseDouble(amount.getText().toString()))
+                        .put("category", category.getText().toString())
+                        .put("merchant", merchant.getText().toString())
+                        .put("note", note.getText().toString()));
+                toast("已保存");
+                showHome();
+            } catch(Exception e) { toast("保存失败"); }
+        }).show();
+    }
+
+    private void confirmDeleteRecord(JSONObject r) {
+        new AlertDialog.Builder(this)
+                .setTitle("删除这笔账单？")
+                .setMessage(r.optString("note", r.optString("merchant", "这笔账单")) + " · ¥" + WalletState.money(r.optDouble("amount", 0)))
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (d,w)->{
+                    try { WalletState.deleteRecord(this, r.optString("id")); toast("已删除"); showHome(); }
+                    catch(Exception e) { toast("删除失败"); }
+                }).show();
     }
 
     private void handlePending(JSONObject r, String decision) {

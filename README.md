@@ -1,6 +1,30 @@
-# 掌心窗公开版 v0.3.7.6
+# 掌心窗公开版 v0.3.7.9
 
-## v0.3.7.6 双向申请补全
+## v0.3.7.9 MCP 新工具暴露修复
+
+这版修复部分 AI/MCP 客户端出现“后端 health 已经有新工具，但 ChatGPT 工具面板没有暴露双向申请/外卖助手接口”的问题。
+
+- 普通 `/mcp` 提前注册 `wallet_takeout_action` 统一入口，单独工具没刷出时也能通过 `action` 调用。
+- 新增 `/mcp-wallet` 专用端点，只暴露小金库、双向申请和外卖助手工具，减少被客户端工具数量限制截断的概率。
+- `/health` 增加 `mcp_wallet_endpoint`、`schema_exposure_fix`、`priority_tool`、`wallet_takeout_tools`，方便确认部署结果。
+- 原来的 `/mcp`、`/sse` 和手机端功能不变。
+
+## v0.3.7.9 外卖助手与小金库联动
+- 守护页新增「今天吃什么」入口，外卖助手作为单独页面存在，不塞进小金库。
+- 整合私人版外卖助手：单餐预算、今日外卖预算、口味偏好、常点外卖库、记住这道饭、帮我挑、打开链接、复制备注、点到付款页。
+- 外卖助手只帮用户整理、跳转和点到付款前；真正付款必须由用户本人确认。
+- 外卖计划可提交到小金库审批；小金库审批通过后会自动生成一条支出记录，避免“批完还要手动记账”。
+- 审批自动入账使用 approval_id/source_key 去重，重复处理同一申请不会重复计入支出。
+
+## v0.3.7.9 小金库双向审批闭环修复
+
+- 补全陪伴者发起申请、查看结果、用户理由写回的 MCP 闭环，不需要控制用户屏幕。
+- 用户处理陪伴者申请时，点击通过 / 暂缓 / 驳回后会弹出理由输入框，理由会写入审批记录。
+- 普通账单金额不再静默默认为 0；申请标题兼容 `item/title/purpose/content/name/note/reason`。
+- 最近消费卡片支持左滑展开操作，可编辑或删除账单；删除前会二次确认。
+- 新增 `save_user_wallet_request_result`、`edit_wallet_record`、`delete_wallet_record`，保留旧工具兼容。
+
+## v0.3.7.9 双向申请补全
 
 - MCP 新增 `submit_companion_wallet_request`：陪伴者可以主动提交一条申请，等待用户处理。
 - MCP 新增 `list_companion_wallet_requests`：陪伴者可以查看自己提交给用户的申请，以及用户通过、暂缓或驳回后的结果。
@@ -9,35 +33,35 @@
 - 继续保留 `save_wallet_request_result`，用于更中性地保存处理结果。
 
 
-## v0.3.7.6 反馈修复
+## v0.3.7.9 反馈修复
 
 - 应用门禁悬浮窗改为全屏触摸拦截兜底：全屏页受系统限制时，悬浮层会挡住下方 App 点击和滑动。
 - 小金库「待审批」统一改为「审批列表」，生活细节摘要改为“待处理/审批记录”，避免把历史记录误认成未处理。
 - 审批列表新增「我的申请」和「陪伴者的申请」分组，支持折叠查看，为双向申请做准备。
 - MCP 增加更中性的 `save_wallet_request_result` 处理结果工具，保留旧工具兼容。
 
-## v0.3.7.6 小金库更新
+## v0.3.7.9 小金库更新
 - 守护页新增“小金库”：本地记账、预算规则、历史月份侧边栏、待审批详情。
 - 小金库默认保存在手机本地；MCP/AI 只能在用户配置连接后读取预算摘要、最近记录和待审批。
 - 陪伴者名字跟随设置页“陪伴者/AI 名称”，例如会显示“等待陪伴者审批”。
 - 开启通知读取权限后，可在本地识别疑似支付通知并生成待确认账单；不读取支付密码，不接管银行卡。
 
 
-## v0.3.7.6 修复重点
+## v0.3.7.9 修复重点
 
 - 修复归电来电页「接通」后没有跳转到归电设置里指定包名的问题：接通后会读取 `guidian_target_package`，关闭来电页后再按包名启动目标 App，失败时写入调试日志并提示原因。
 - 修复陪伴页「xx 的行动」不显示 AI/MCP 工具调用记录的问题：MCP 行动会同步写入统一行动日志，手机端同步时会合并本地与远端行动记录，不再被本地旧记录遮挡。
 - Railway 文档改为手动双服务部署说明，移除 README 中未生成模板码的一键部署引导，避免用户误把 server 域名当成 MCP 域名。
 - 今日页「此刻状态」卡片新增媒体状态：用户开启通知使用权后，可显示正在播放的歌曲/音频标题、歌手、播放状态与来源 App。
 
-## v0.3.7.6 快速修复
+## v0.3.7.9 快速修复
 
 - 补充 `server/Dockerfile`、`.dockerignore` 与 `requirements.txt`，避免 Railway 在 server 服务构建阶段无法识别 Python 项目。Railway server 服务现在推荐：Root Directory=`server`，Build Command 留空，Start Command 留空，由 Dockerfile 启动 `python linjian_server.py`。
 
 - 修复网页端 MCP 管理器连接公开版 MCP 时的跨域响应头问题。
 - 设置页「连接设置」会自动保存服务器地址、Token、设备 ID 与轮询间隔，杀掉后台再打开也会保留。
 
-## v0.3.7.6 日记与守护日历更新
+## v0.3.7.9 日记与守护日历更新
 
 - 守护日历事件补充稳定 ID，支持在日期详情卡中编辑、确认删除，并兼容没有 ID 的旧数据。
 - MCP 完善 `list_guardian_days`、`add_guardian_day`、`update_guardian_day`、`delete_guardian_day`。
@@ -112,15 +136,15 @@ update.json   版本更新信息
 
 1. 将源码包解压并覆盖到公开仓库根目录，确保 `.github`、`android`、`server`、`mcp` 位于根目录。
 2. 打开 GitHub 仓库 → **Actions** → **Build Android Public APK** → **Run workflow**。
-3. 构建成功后下载 `zhangxinchuang-public-v0.3.7.6-apk` artifact。
+3. 构建成功后下载 `zhangxinchuang-public-v0.3.7.9-apk` artifact。
 
 构建产物为：
 
 ```text
-android/Zhangxinchuang-public-v0.3.7.6.apk
+android/Zhangxinchuang-public-v0.3.7.9.apk
 ```
 
-版本名 `0.3.7.6`，版本码 `30706`。
+版本名 `0.3.7.9`，版本码 `30709`。
 
 ### 固定签名
 

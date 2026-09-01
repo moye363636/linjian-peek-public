@@ -84,7 +84,7 @@ public class WalletState {
             for (Map.Entry<String, Double> e : cat.entrySet()) cats.put(e.getKey(), round2(e.getValue()));
             out.put("ok", true);
             out.put("device_id", AppPrefs.device(ctx));
-            out.put("wallet_version", "0.1.0-public-local");
+            out.put("wallet_version", "0.3.7.9-public-wallet-auto-record");
             out.put("month", month);
             out.put("current_month", currentMonth);
             out.put("is_current_month", currentMonth.equals(month));
@@ -204,10 +204,12 @@ public class WalletState {
             if ("get_wallet_rules".equals(action)) return new JSONObject().put("ok", true).put("rules", rules(ctx));
             if ("set_wallet_rules".equals(action)) return setRules(ctx, cmd);
             if ("add_wallet_record".equals(action)) return addRecord(ctx, cmd, cmd.optBoolean("require_confirm", false) ? "pending" : cmd.optString("status", "confirmed"));
+            if ("edit_wallet_record".equals(action) || "update_wallet_record".equals(action)) return updateRecord(ctx, cmd);
+            if ("delete_wallet_record".equals(action) || "remove_wallet_record".equals(action)) return deleteRecord(ctx, cmd.optString("id", ""));
             if ("submit_companion_wallet_request".equals(action)) { cmd.put("requester_role", "companion"); cmd.put("source", "mcp"); cmd.put("created_by", "companion"); return submitApprovalRequest(ctx, cmd); }
             if ("submit_wallet_approval".equals(action) || "submit_wallet_request".equals(action)) return submitApprovalRequest(ctx, cmd);
             if ("confirm_wallet_record".equals(action)) return confirmRecord(ctx, cmd);
-            if ("decide_wallet_approval".equals(action) || "save_wallet_request_result".equals(action) || "update_wallet_request_result".equals(action)) return decideApproval(ctx, cmd);
+            if ("decide_wallet_approval".equals(action) || "save_wallet_request_result".equals(action) || "update_wallet_request_result".equals(action) || "save_user_wallet_request_result".equals(action)) return decideApproval(ctx, cmd);
             if ("wallet_approval_request".equals(action)) return approvalRequest(ctx, cmd);
             if ("open_wallet".equals(action)) return new JSONObject().put("ok", true).put("result", "open_wallet_supported_by_activity");
             return new JSONObject().put("ok", false).put("error", "unknown_wallet_action").put("action", action);
@@ -257,20 +259,22 @@ public class WalletState {
     }
 
     public static JSONObject addRecord(Context ctx, JSONObject data, String status) throws Exception {
-        double amount = data.optDouble("amount", 0);
-        if (amount <= 0) return new JSONObject().put("ok", false).put("error", "amount_required");
+        double amount = optMoney(data, 0, "amount", "amount_yuan", "price", "cost", "estimated_amount", "total");
+        if (amount <= 0) return new JSONObject().put("ok", false).put("error", "amount_required").put("hint", "请传入 amount/price/cost/estimated_amount，金额不能默认为 0。倒贴或无金额申请请走小金库申请。");
         JSONObject r = new JSONObject();
         long now = data.optLong("created_at_ms", System.currentTimeMillis());
+        String title = firstText(data, "", "note", "title", "item", "purpose", "content", "name", "reason");
         r.put("id", data.optString("id", UUID.randomUUID().toString()));
         r.put("amount", round2(amount));
         r.put("type", data.optString("type", "expense"));
-        r.put("category", data.optString("category", guessCategory(data.optString("merchant", data.optString("note", "")))));
+        r.put("category", data.optString("category", guessCategory(data.optString("merchant", title))));
         r.put("merchant", data.optString("merchant", ""));
-        r.put("note", data.optString("note", data.optString("reason", "")));
+        r.put("note", title);
         r.put("source", data.optString("source", "manual"));
         r.put("source_app", data.optString("source_app", ""));
         r.put("source_package", data.optString("source_package", ""));
         r.put("source_key", data.optString("source_key", ""));
+        if (data.has("approval_id")) r.put("approval_id", data.optString("approval_id", ""));
         r.put("status", status == null || status.length() == 0 ? "confirmed" : status);
         r.put("created_at_ms", now);
         r.put("created_at_local", formatLocal(now));
@@ -285,8 +289,10 @@ public class WalletState {
     }
 
     public static JSONObject submitApprovalRequest(Context ctx, JSONObject data) throws Exception {
-        double amount = data.optDouble("amount", 0);
+        double amount = optMoney(data, 0, "amount", "amount_yuan", "price", "cost", "estimated_amount", "total");
         if (amount < 0) return new JSONObject().put("ok", false).put("error", "amount_invalid");
+        String item = firstText(data, "", "item", "title", "purpose", "content", "name", "note", "reason");
+        if (item.length() == 0) item = "这笔申请";
         String requester = normalizeApprovalRole(data.optString("requester_role", data.optString("requester", "")));
         if (requester.length() == 0) requester = "mcp".equals(data.optString("source", "")) || "companion".equals(data.optString("created_by", "")) ? "companion" : "user";
         String approver = "companion".equals(requester) ? "user" : "companion";
@@ -295,11 +301,11 @@ public class WalletState {
         r.put("id", data.optString("id", UUID.randomUUID().toString()));
         r.put("amount", round2(amount));
         r.put("type", "approval_request");
-        r.put("category", data.optString("category", guessCategory(data.optString("item", data.optString("note", "")))));
+        r.put("category", data.optString("category", guessCategory(item)));
         r.put("merchant", data.optString("merchant", ""));
-        r.put("item", data.optString("item", data.optString("note", "这笔消费")));
+        r.put("item", item);
         r.put("reason", data.optString("reason", ""));
-        r.put("note", data.optString("note", data.optString("item", "这笔消费")));
+        r.put("note", firstText(data, item, "note", "item", "title", "purpose", "content", "name"));
         r.put("necessity", data.optInt("necessity", 3));
         r.put("impulse", data.optInt("impulse", 3));
         r.put("source", data.optString("source", "manual"));
@@ -335,6 +341,11 @@ public class WalletState {
         JSONArray arr = records(ctx);
         JSONArray next = new JSONArray();
         JSONObject found = null;
+        JSONObject autoRecord = null;
+        boolean shouldAutoRecord = false;
+        String recordId = "";
+        String sourceKey = id.length() == 0 ? "" : ("approval:" + id);
+        long decidedAt = System.currentTimeMillis();
         for (int i = 0; i < arr.length(); i++) {
             JSONObject r = arr.optJSONObject(i);
             if (r == null) continue;
@@ -343,18 +354,97 @@ public class WalletState {
                 found.put("status", status);
                 found.put("decision", decision);
                 found.put("approval_message", message);
+                found.put("decision_note", message);
+                if (cmd.has("user_reason")) found.put("user_reason", cmd.optString("user_reason", message));
                 String approverRole = found.optString("approver_role", "companion");
                 String defaultApprover = "user".equals(approverRole) ? AppPrefs.userName(ctx) : AppPrefs.companionName(ctx);
                 found.put("approved_by", cmd.optString("approved_by", cmd.optString("handler_name", defaultApprover)));
-                found.put("decided_at_ms", System.currentTimeMillis());
-                found.put("decided_at_local", formatLocal(System.currentTimeMillis()));
+                found.put("decided_at_ms", decidedAt);
+                found.put("decided_at_local", formatLocal(decidedAt));
+                double amount = Math.max(0, found.optDouble("amount", 0));
+                shouldAutoRecord = "approved".equals(decision) && amount > 0
+                        && found.optString("wallet_record_id", found.optString("linked_wallet_record_id", "")).length() == 0
+                        && !hasSourceKey(arr, sourceKey);
+                if (shouldAutoRecord) {
+                    recordId = UUID.randomUUID().toString();
+                    found.put("wallet_record_id", recordId);
+                    found.put("linked_wallet_record_id", recordId);
+                    found.put("auto_recorded", true);
+                    found.put("auto_record_source_key", sourceKey);
+                    if (message.length() == 0 || defaultApprovalMessage("approved").equals(message)) found.put("approval_message", defaultApprovalMessage("approved"));
+                }
                 next.put(found);
             } else next.put(r);
         }
         if (found == null) return new JSONObject().put("ok", false).put("error", "approval_not_found").put("id", id);
         saveRecords(ctx, next);
-        DebugState.append(ctx, "小金库审批已处理：" + found.optString("decision") + " ¥" + money(found.optDouble("amount", 0)));
-        return new JSONObject().put("ok", true).put("approval", found).put("wallet_state", collect(ctx));
+        if (shouldAutoRecord) {
+            JSONObject rec = new JSONObject();
+            rec.put("id", recordId);
+            rec.put("amount", round2(found.optDouble("amount", 0)));
+            rec.put("type", "expense");
+            rec.put("category", found.optString("category", "其他"));
+            rec.put("merchant", found.optString("merchant", ""));
+            rec.put("note", firstText(found, found.optString("item", "审批通过支出"), "item", "note", "title", "purpose", "content", "name", "reason"));
+            rec.put("source", "wallet_approval");
+            rec.put("source_key", sourceKey);
+            rec.put("approval_id", id);
+            rec.put("created_at_ms", decidedAt);
+            JSONObject added = addRecord(ctx, rec, "confirmed");
+            autoRecord = added.optJSONObject("record");
+        }
+        DebugState.append(ctx, "小金库审批已处理：" + found.optString("decision") + " ¥" + money(found.optDouble("amount", 0)) + (shouldAutoRecord ? "，已自动入账" : ""));
+        JSONObject out = new JSONObject().put("ok", true).put("approval", found).put("wallet_state", collect(ctx));
+        if (autoRecord != null) out.put("auto_record", autoRecord);
+        return out;
+    }
+
+    public static JSONObject updateRecord(Context ctx, JSONObject cmd) throws Exception {
+        String id = cmd.optString("id", "");
+        if (id.length() == 0) return new JSONObject().put("ok", false).put("error", "id_required");
+        JSONArray arr = records(ctx);
+        JSONArray next = new JSONArray();
+        JSONObject found = null;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject r = arr.optJSONObject(i);
+            if (r == null) continue;
+            if (id.equals(r.optString("id"))) {
+                found = new JSONObject(r.toString());
+                if (cmd.has("amount") || cmd.has("amount_yuan") || cmd.has("price") || cmd.has("cost") || cmd.has("estimated_amount") || cmd.has("total")) {
+                    double amount = optMoney(cmd, found.optDouble("amount", 0), "amount", "amount_yuan", "price", "cost", "estimated_amount", "total");
+                    if (amount <= 0) return new JSONObject().put("ok", false).put("error", "amount_required");
+                    found.put("amount", round2(amount));
+                }
+                if (cmd.has("type")) found.put("type", cmd.optString("type", found.optString("type", "expense")));
+                if (cmd.has("category")) found.put("category", cmd.optString("category", found.optString("category", "其他")));
+                if (cmd.has("merchant")) found.put("merchant", cmd.optString("merchant", found.optString("merchant", "")));
+                if (cmd.has("note") || cmd.has("title") || cmd.has("item") || cmd.has("purpose") || cmd.has("content") || cmd.has("name")) found.put("note", firstText(cmd, found.optString("note", ""), "note", "title", "item", "purpose", "content", "name"));
+                found.put("updated_at_ms", System.currentTimeMillis());
+                found.put("updated_at_local", formatLocal(System.currentTimeMillis()));
+                next.put(found);
+            } else next.put(r);
+        }
+        if (found == null) return new JSONObject().put("ok", false).put("error", "record_not_found").put("id", id);
+        saveRecords(ctx, next);
+        DebugState.append(ctx, "小金库账单已编辑：¥" + money(found.optDouble("amount", 0)) + " " + found.optString("category", ""));
+        return new JSONObject().put("ok", true).put("record", found).put("wallet_state", collect(ctx));
+    }
+
+    public static JSONObject deleteRecord(Context ctx, String id) throws Exception {
+        if (id == null || id.length() == 0) return new JSONObject().put("ok", false).put("error", "id_required");
+        JSONArray arr = records(ctx);
+        JSONArray next = new JSONArray();
+        JSONObject removed = null;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject r = arr.optJSONObject(i);
+            if (r == null) continue;
+            if (id.equals(r.optString("id"))) removed = r;
+            else next.put(r);
+        }
+        if (removed == null) return new JSONObject().put("ok", false).put("error", "record_not_found").put("id", id);
+        saveRecords(ctx, next);
+        DebugState.append(ctx, "小金库账单已删除：¥" + money(removed.optDouble("amount", 0)) + " " + removed.optString("category", ""));
+        return new JSONObject().put("ok", true).put("deleted_record", removed).put("wallet_state", collect(ctx));
     }
 
     private static String requesterRoleOf(JSONObject r) {
@@ -373,7 +463,7 @@ public class WalletState {
     private static String defaultApprovalMessage(String decision) {
         if ("rejected".equals(decision)) return "这笔先不批，先冷静一下。";
         if ("delayed".equals(decision)) return "先等 20 分钟，真的还想买再回来申请。";
-        return "通过，买完记得回小金库记一笔。";
+        return "通过，已自动记入小金库支出。";
     }
 
     public static JSONObject confirmRecord(Context ctx, JSONObject cmd) throws Exception {
@@ -412,7 +502,7 @@ public class WalletState {
         String message = cmd.optString("message", "");
         if (decision.length() == 0) {
             decision = "approved";
-            message = "通过。记得买完回来给小金库记一笔。";
+            message = "通过。已自动记入小金库支出。";
             if (amount >= approvalThreshold(ctx) && impulse >= 4 && necessity <= 3) { decision = "delayed"; message = "先冷静 20 分钟。真的还想要再回来申请。"; }
             if (amount > monthlyBudget(ctx) * 0.35 && necessity <= 2) { decision = "rejected"; message = "这笔太重了，今天先不买。"; }
         }
@@ -504,6 +594,30 @@ public class WalletState {
         if (key == null || key.length() == 0) return false;
         for (int i = 0; i < arr.length(); i++) if (key.equals(arr.optJSONObject(i) == null ? "" : arr.optJSONObject(i).optString("source_key"))) return true;
         return false;
+    }
+
+    private static double optMoney(JSONObject data, double def, String... keys) {
+        if (data == null || keys == null) return def;
+        for (String k : keys) {
+            if (k == null || !data.has(k) || data.isNull(k)) continue;
+            Object v = data.opt(k);
+            if (v instanceof Number) return ((Number)v).doubleValue();
+            try {
+                String raw = String.valueOf(v).replace("￥", "").replace("¥", "").replace("元", "").trim();
+                if (raw.length() > 0) return Double.parseDouble(raw);
+            } catch (Exception ignored) {}
+        }
+        return def;
+    }
+
+    private static String firstText(JSONObject data, String def, String... keys) {
+        if (data == null || keys == null) return def == null ? "" : def;
+        for (String k : keys) {
+            if (k == null || !data.has(k) || data.isNull(k)) continue;
+            String v = data.optString(k, "").trim();
+            if (v.length() > 0) return v;
+        }
+        return def == null ? "" : def;
     }
 
     public static String guessCategory(String text) {
